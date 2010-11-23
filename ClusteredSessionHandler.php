@@ -186,7 +186,7 @@ class ClusteredSessionHandler {
 	public function write( $sessionID, $data ) {
 		// Only save data if it has changed
 		if( $this->initSessionData === $data ) {
-			return $result;
+			return $data;
 		}
 		$this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
 		$stmt = $this->db()->prepare( "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES(?,?,?)" );
@@ -296,4 +296,4 @@ class ClusteredSessionHandler {
 	}
 }
 #ClusteredSessionHandler::connect_to_memcached( '127.0.0.1', '11211' );
-$takeone = ClusteredSessionHandler::factory('localhost', 'root', '' );
+$ClusteredSessionHandler = ClusteredSessionHandler::factory('localhost', 'root', '' );
