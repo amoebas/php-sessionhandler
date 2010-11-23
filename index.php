@@ -1,30 +1,33 @@
 <?php
-function get_raw_user_IP() {
-	if( isset( $_SERVER ) ) {
-		if( isset( $_SERVER[ 'HTTP_X_FORWARDED_FOR' ] ) ) {
-			return $_SERVER[ 'HTTP_X_FORWARDED_FOR' ];
-		}
-		if( isset( $_SERVER[ 'HTTP_CLIENT_IP' ] ) ) {
-			return $_SERVER[ 'HTTP_CLIENT_IP' ];
-		}
-
-		return (array_key_exists('REMOTE_ADDR', $_SERVER ) ) ? $_SERVER['REMOTE_ADDR']:'';
-	}
-}
-
-session_start();
-
-if( isset( $_GET['clear' ] ) ) {
-	session_destroy();
-	echo 'Session has been killed.<br /><a href="?">Return</a>';
-	exit();
-}
-
-if( !isset( $_SESSION['count'] ) ) {
-	$_SESSION['count'] = 1;
-}
-echo 'Hello ip '.get_raw_user_IP().' with sessionId: <pre>'.  session_id() . '</pre> you seen this page <strong>'.$_SESSION['count'].'</strong> times'.PHP_EOL;
-$_SESSION['count']++;
+/**
+ * This is just a small page to test the ClusteredSessionHandler
+ * 
+ */
 ?>
-<br /><a href="?clear">Clear session</a>
+<html><head><title>Session tester</title></head><body>
+<div>
+	<a href="?">Session</a> | 
+	<a href="?clear">Crunch session</a> |
+	<a href="?nosession">No session</a>
+</div>
+<?php
 
+if( isset( $_GET[ 'nosession' ] ) ) {
+	echo '<p>Hello, I have no idea what a session is right now, this is what i think';
+	echo ' your sessionId is: <strong>'.session_id().'</strong></p>';
+} elseif( isset( $_GET['clear' ] ) ) {
+	session_start();
+	session_destroy();
+	echo '<p>Session has been killed.</p>';
+} else {
+	session_start();
+	if( !isset( $_SESSION['count'] ) ) {
+		$_SESSION['count'] = 0;
+	}
+	$_SESSION['count']++;
+	echo '<p>Hello, sessionId: <strong>'.  session_id() . '</strong> you\'ve seen this page'.
+	' <strong>'.$_SESSION['count'].'</strong> times</p>';
+}
+?>
+</body>
+</html>
