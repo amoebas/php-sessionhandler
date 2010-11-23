@@ -46,13 +46,19 @@ class ClusteredSessionHandler {
 	 *
 	 * @var mysqli
 	 */
-	public static $mysql_link = null;
+	protected $dbLink = null;
 
 	/**
 	 *
 	 * @var string - serialized from php
 	 */
 	private $initSessionData;
+
+	private $host;
+
+	private $password;
+
+	private $user;
 
 	/**
 	 * Creates and initializes the sessionHandler
@@ -63,10 +69,8 @@ class ClusteredSessionHandler {
 	 * @return ClusteredSessionHandler
 	 */
 	public static function factory( $dbhost, $dbuser, $dbpassword ) {
-		self::connect_to_database( $dbhost, $dbuser, $dbpassword );
-		$sessionHandler = new ClusteredSessionHandler();
+		$sessionHandler = new ClusteredSessionHandler( $dbhost, $dbuser, $dbpassword );
 		session_set_save_handler( array( &$sessionHandler, "open" ), array( &$sessionHandler, "close" ), array( &$sessionHandler, "read" ), array( &$sessionHandler, "write" ), array( &$sessionHandler, "destroy" ), array( &$sessionHandler, "gc" ) );
-		return $sessionHandler;
 	}
 
 	/**
@@ -75,9 +79,20 @@ class ClusteredSessionHandler {
 	 * @param string $host
 	 * @param string $user
 	 * @param string $password
+	 * @return mysqli
 	 */
-	private static function connect_to_database( $host, $user, $password ) {
-		self::$mysql_link = mysqli_connect( $host, $user, $password, 'sessions' );
+	private function db() {
+		if( $this->dbLink instanceof mysqli ) {
+			return $this->dbLink;
+		}
+		$this->dbLink = @new mysqli( $this->host, $this->user, $this->password, 'sessions' );
+
+		if( mysqli_connect_errno() ) {
+			self::syslog('Can\'t connect to MySQL Server. Errorcode: '.mysqli_connect_error());
+			$this->dbLink = null;
+			return false;
+		}
+		return $this->dbLink;
 	}
 
 	/**
@@ -101,7 +116,10 @@ class ClusteredSessionHandler {
 	 * @param string $memcachePort
 	 * @return boolean
 	 */
-	public function __construct() {
+	public function __construct($host, $user, $password ) {
+		$this->host = $host;
+		$this->user = $user;
+		$this->password = $password;
 		register_shutdown_function( "session_write_close" );
 		$this->initSessionData = null;
 		return true;
@@ -128,7 +146,7 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function close() {
-		
+		#self::$memcache = null;
 		$this->initSessionData = null;
 		return true;
 	}
@@ -141,12 +159,17 @@ class ClusteredSessionHandler {
 	 */
 	public function read( $sessionID ) {
 		$data = $this->memcache_get( $sessionID );
-		if( $data === false ) {
-			$sessionIDEscaped = mysql_real_escape_string( $sessionID );
-			$result = $this->query( "SELECT `session_data` FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionIDEscaped'" );
-			if( is_resource( $result ) && ( mysql_num_rows( $result ) !== 0 ) ) {
-				$data = mysql_result( $result, 0, "session_data" );
-			}
+		if( $data !== false ) {
+			return $data;
+		}
+		$stmt = $this->db()->prepare( "SELECT `session_data` FROM `sessions`.`tblsessions` WHERE `session_id`= ?" );
+		$stmt->bind_param( 's', $sessionID );
+		$stmt->execute();
+		$stmt->bind_result( $data );
+		$stmt->fetch();
+		$stmt->close();
+		
+		if( $data ) {
 			$this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
 		}
 		return $data;
@@ -161,19 +184,22 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function write( $sessionID, $data ) {
-		$result = $this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
-		if( $this->initSessionData !== $data ) {
-			$sessionID = mysql_real_escape_string( $sessionID );
-			$sessionExpirationTS = (intval( ini_get( "session.gc_maxlifetime" ) ) + time());
-			$sessionData = mysql_real_escape_string( $data );
-			$r = $this->query( "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES('$sessionID',$sessionExpirationTS,'$sessionData')" );
-			$result = is_resource( $r );
+		// Only save data if it has changed
+		if( $this->initSessionData === $data ) {
+			return $result;
 		}
-		return $result;
+		
+		$result = $this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
+		$sessionID = mysql_real_escape_string( $sessionID );
+		$sessionExpirationTS = (intval( ini_get( "session.gc_maxlifetime" ) ) + time());
+		$sessionData = mysql_real_escape_string( $data );
+		$r = $this->query( $this->db(), "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES('$sessionID',$sessionExpirationTS,'$sessionData')" );
+		$result = is_resource( $r );
+		
 	}
 
 	/**
-	 * Destory session with sessionid
+	 * Destroy session with sessionid
 	 *
 	 * @param string $sessionID
 	 * @return boolean
@@ -181,7 +207,7 @@ class ClusteredSessionHandler {
 	public function destroy( $sessionID ) {
 		$this->memcache_delete( $sessionID );
 		$sessionID = mysql_real_escape_string( $sessionID );
-		$this->query( "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionID'" );
+		$this->query( $this->db(), "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionID'" );
 
 		return true;
 	}
@@ -200,7 +226,7 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function gc( $maxlifetime ) {
-		$r = $this->query( "SELECT `session_id` FROM `sessions`.`tblsessions` WHERE `session_expiration`<" . (time() - $maxlifetime) );
+		$r = $this->query( $this->db(), "SELECT `session_id` FROM `sessions`.`tblsessions` WHERE `session_expiration`<" . (time() - $maxlifetime) );
 		if( is_resource( $r ) && ($rows = mysql_num_rows( $r ) !== 0) ) {
 			for( $i = 0; $i < $rows; $i++ ) {
 				$this->destroy( mysql_result( $r, $i, "session_id" ) );
@@ -215,11 +241,17 @@ class ClusteredSessionHandler {
 	 * @param string $sql
 	 * @return resource For SELECT, SHOW, DESCRIBE, EXPLAIN and other statements returning resultset,
 	 */
-	private function query( $sql ) {
-		$resource = mysqli_query( self::$mysql_link, $sql );
-		if( mysqli_errno() ) {
-			self::syslog( mysqli_error() );
+	private function query( $db, $sql ) {
+		if( ! $db instanceof mysqli) {
+			return false;
 		}
+		
+		$resource = $db->query( $sql );
+
+		if( mysqli_errno( $this->db() ) ) {
+			self::syslog( mysqli_error( $db ) );
+		}
+		
 		return $resource;
 	}
 
@@ -275,4 +307,4 @@ class ClusteredSessionHandler {
 	}
 }
 #ClusteredSessionHandler::connect_to_memcached( '127.0.0.1', '11211' );
-$sessionHandler = ClusteredSessionHandler::factory('localhost', 'root', '' );
+ClusteredSessionHandler::factory('localhost', 'root', '' );
