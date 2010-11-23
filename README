@@ -1,0 +1,14 @@
+This class takes care of setting the php session handler to use a custom user
+implemented session handler.
+
+The basic functionality is to save all the sessions in a MySQL Database table.
+
+Optional usage is to have a memcache as a write through cache for performance on
+read only requests for the session.
+
+This setup is good for loadbalanced and clustered webservers where toss the user
+between several servers.
+
+It's also good for virtual clustered environments with GFS as it's a known bug
+that the PHP session module can stall several servers while waiting for another
+process to releases the lock on the session file.
