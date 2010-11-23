@@ -1,7 +1,6 @@
 <?php
 /**
  * @package ClusteredSessionHandler
- * @copyright Webguidepartner AB
  * @version $Id$
  *
  * This class replaces the default php session handler with one that is more
