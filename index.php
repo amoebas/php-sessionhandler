@@ -10,14 +10,6 @@ function get_raw_user_IP() {
 
 		return (array_key_exists('REMOTE_ADDR', $_SERVER ) ) ? $_SERVER['REMOTE_ADDR']:'';
 	}
-
-	if( getenv( 'HTTP_X_FORWARDED_FOR' ) ) {
-		return getenv( 'HTTP_X_FORWARDED_FOR' );
-	}
-	if( getenv( 'HTTP_CLIENT_IP' ) ) {
-		return getenv( 'HTTP_CLIENT_IP' );
-	}
-	return getenv( 'REMOTE_ADDR' );
 }
 
 session_start();
