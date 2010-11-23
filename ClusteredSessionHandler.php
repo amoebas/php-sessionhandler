@@ -40,7 +40,13 @@ class ClusteredSessionHandler {
 	 *
 	 * @var Memcache
 	 */
-	private static $memcache = null;
+	public static $memcache = null;
+
+	/**
+	 *
+	 * @var mysqli
+	 */
+	public static $mysql_link = null;
 
 	/**
 	 *
@@ -71,7 +77,7 @@ class ClusteredSessionHandler {
 	 * @param string $password
 	 */
 	private static function connect_to_database( $host, $user, $password ) {
-		$res = mysql_connect( $host, $user, $password );
+		self::$mysql_link = mysqli_connect( $host, $user, $password, 'sessions' );
 	}
 
 	/**
@@ -122,7 +128,7 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function close() {
-		self::$memcache = null;
+		
 		$this->initSessionData = null;
 		return true;
 	}
@@ -137,7 +143,7 @@ class ClusteredSessionHandler {
 		$data = $this->memcache_get( $sessionID );
 		if( $data === false ) {
 			$sessionIDEscaped = mysql_real_escape_string( $sessionID );
-			$result = mysql_query( "SELECT `session_data` FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionIDEscaped'" );
+			$result = $this->query( "SELECT `session_data` FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionIDEscaped'" );
 			if( is_resource( $result ) && ( mysql_num_rows( $result ) !== 0 ) ) {
 				$data = mysql_result( $result, 0, "session_data" );
 			}
@@ -148,20 +154,19 @@ class ClusteredSessionHandler {
 
 	/**
 	 * Write session with sessionId with data
+	 * This is called upon script termination or when session_write_close() is called, which ever is first.
 	 *
 	 * @param string $sessionID
 	 * @param string $data
 	 * @return boolean
 	 */
 	public function write( $sessionID, $data ) {
-		
-		# This is called upon script termination or when session_write_close() is called, which ever is first.
 		$result = $this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
 		if( $this->initSessionData !== $data ) {
 			$sessionID = mysql_real_escape_string( $sessionID );
 			$sessionExpirationTS = (intval( ini_get( "session.gc_maxlifetime" ) ) + time());
 			$sessionData = mysql_real_escape_string( $data );
-			$r = $this->sql_query( "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES('$sessionID',$sessionExpirationTS,'$sessionData')" );
+			$r = $this->query( "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES('$sessionID',$sessionExpirationTS,'$sessionData')" );
 			$result = is_resource( $r );
 		}
 		return $result;
@@ -176,7 +181,7 @@ class ClusteredSessionHandler {
 	public function destroy( $sessionID ) {
 		$this->memcache_delete( $sessionID );
 		$sessionID = mysql_real_escape_string( $sessionID );
-		$this->sql_query( "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionID'" );
+		$this->query( "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionID'" );
 
 		return true;
 	}
@@ -195,7 +200,7 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function gc( $maxlifetime ) {
-		$r = $this->sql_query( "SELECT `session_id` FROM `sessions`.`tblsessions` WHERE `session_expiration`<" . (time() - $maxlifetime) );
+		$r = $this->query( "SELECT `session_id` FROM `sessions`.`tblsessions` WHERE `session_expiration`<" . (time() - $maxlifetime) );
 		if( is_resource( $r ) && ($rows = mysql_num_rows( $r ) !== 0) ) {
 			for( $i = 0; $i < $rows; $i++ ) {
 				$this->destroy( mysql_result( $r, $i, "session_id" ) );
@@ -210,10 +215,10 @@ class ClusteredSessionHandler {
 	 * @param string $sql
 	 * @return resource For SELECT, SHOW, DESCRIBE, EXPLAIN and other statements returning resultset,
 	 */
-	private function sql_query( $sql ) {
-		$resource = @mysql_query( $sql );
-		if( mysql_errno() ) {
-			self::syslog( mysql_error() );
+	private function query( $sql ) {
+		$resource = mysqli_query( self::$mysql_link, $sql );
+		if( mysqli_errno() ) {
+			self::syslog( mysqli_error() );
 		}
 		return $resource;
 	}
@@ -264,7 +269,7 @@ class ClusteredSessionHandler {
 	 * @param string $message
 	 */
 	private static function syslog( $message ) {
-		openlog('session', LOG_ODELAY,LOG_LOCAL0 );
+		openlog('session', LOG_ODELAY, LOG_LOCAL0 );
 		syslog( LOG_CRIT, __FILE__.' '.$message );
 		closelog();
 	}
