@@ -40,7 +40,7 @@ class ClusteredSessionHandler {
 	 *
 	 * @var Memcache
 	 */
-	private static $memcache = null;
+	public static $memcache = null;
 
 	/**
 	 *
@@ -122,7 +122,9 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function close() {
-		self::$memcache = null;
+		if( isset( self::$memcache ) ) {
+			self::$memcache = null;
+		}
 		$this->initSessionData = null;
 		return true;
 	}
