@@ -71,6 +71,7 @@ class ClusteredSessionHandler {
 	public static function factory( $dbhost, $dbuser, $dbpassword ) {
 		$sessionHandler = new ClusteredSessionHandler( $dbhost, $dbuser, $dbpassword );
 		session_set_save_handler( array( &$sessionHandler, "open" ), array( &$sessionHandler, "close" ), array( &$sessionHandler, "read" ), array( &$sessionHandler, "write" ), array( &$sessionHandler, "destroy" ), array( &$sessionHandler, "gc" ) );
+		return $sessionHandler;
 	}
 
 	/**
@@ -188,14 +189,14 @@ class ClusteredSessionHandler {
 		if( $this->initSessionData === $data ) {
 			return $result;
 		}
-		
-		$result = $this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
-		$sessionID = mysql_real_escape_string( $sessionID );
-		$sessionExpirationTS = (intval( ini_get( "session.gc_maxlifetime" ) ) + time());
-		$sessionData = mysql_real_escape_string( $data );
-		$r = $this->query( $this->db(), "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES('$sessionID',$sessionExpirationTS,'$sessionData')" );
-		$result = is_resource( $r );
-		
+		$this->memcache_set( $sessionID, $data, false, intval( ini_get( "session.gc_maxlifetime" ) ) );
+		$stmt = $this->db()->prepare( "REPLACE INTO `sessions`.`tblsessions` (`session_id`,`session_expiration`,`session_data`) VALUES(?,?,?)" );
+		$sessionExpire = (intval( ini_get( "session.gc_maxlifetime" ) ) + time());
+		$stmt->bind_param( 'sis', $sessionID, $sessionExpire, $data );
+		$stmt->execute();
+		$written = (bool) $stmt->affected_rows;
+		$stmt->close();
+		return $written;
 	}
 
 	/**
@@ -207,8 +208,10 @@ class ClusteredSessionHandler {
 	public function destroy( $sessionID ) {
 		$this->memcache_delete( $sessionID );
 		$sessionID = mysql_real_escape_string( $sessionID );
-		$this->query( $this->db(), "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`='$sessionID'" );
-
+		$stmt = $this->db()->prepare( "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`= ?" );
+		$stmt->bind_param('s',$sessionID);
+		$stmt->execute();
+		$stmt->close();
 		return true;
 	}
 
@@ -226,33 +229,20 @@ class ClusteredSessionHandler {
 	 * @return boolean
 	 */
 	public function gc( $maxlifetime ) {
-		$r = $this->query( $this->db(), "SELECT `session_id` FROM `sessions`.`tblsessions` WHERE `session_expiration`<" . (time() - $maxlifetime) );
-		if( is_resource( $r ) && ($rows = mysql_num_rows( $r ) !== 0) ) {
-			for( $i = 0; $i < $rows; $i++ ) {
-				$this->destroy( mysql_result( $r, $i, "session_id" ) );
-			}
+		
+		$stmt = $this->db()->prepare( "SELECT `session_id` FROM `sessions`.`tblsessions` WHERE `session_expiration` < ?" );
+		$timeExpire = time() - $maxlifetime;
+		$stmt->bind_param( 'i', $timeExpire);
+		$stmt->execute();
+		$stmt->bind_result( $sessionID );
+		$oldSessions = array();
+		while( $stmt->fetch() ) {
+			$oldSessions[] = $sessionID;
+		}
+		foreach( $oldSessions as $sessionID ) {
+			$this->destroy( $sessionID );
 		}
 		return true;
-	}
-
-	/**
-	 * Runs a sql query and reports to syslog if errors happens
-	 *
-	 * @param string $sql
-	 * @return resource For SELECT, SHOW, DESCRIBE, EXPLAIN and other statements returning resultset,
-	 */
-	private function query( $db, $sql ) {
-		if( ! $db instanceof mysqli) {
-			return false;
-		}
-		
-		$resource = $db->query( $sql );
-
-		if( mysqli_errno( $this->db() ) ) {
-			self::syslog( mysqli_error( $db ) );
-		}
-		
-		return $resource;
 	}
 
 	/**
@@ -307,4 +297,4 @@ class ClusteredSessionHandler {
 	}
 }
 #ClusteredSessionHandler::connect_to_memcached( '127.0.0.1', '11211' );
-ClusteredSessionHandler::factory('localhost', 'root', '' );
+$takeone = ClusteredSessionHandler::factory('localhost', 'root', '' );
