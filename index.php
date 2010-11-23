@@ -20,7 +20,7 @@ function get_raw_user_IP() {
 	return getenv( 'REMOTE_ADDR' );
 }
 
-#session_start();
+session_start();
 
 if( isset( $_GET['clear' ] ) ) {
 	session_destroy();
