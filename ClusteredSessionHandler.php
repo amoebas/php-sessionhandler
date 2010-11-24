@@ -206,7 +206,6 @@ class ClusteredSessionHandler {
 	 */
 	public function destroy( $sessionID ) {
 		$this->memcache_delete( $sessionID );
-		$sessionID = mysql_real_escape_string( $sessionID );
 		$stmt = $this->db()->prepare( "DELETE FROM `sessions`.`tblsessions` WHERE `session_id`= ?" );
 		$stmt->bind_param('s',$sessionID);
 		$stmt->execute();

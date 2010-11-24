@@ -15,7 +15,7 @@
 
 if( isset( $_GET[ 'nosession' ] ) ) {
 	echo '<p>Hello, I have no idea what a session is right now, this is what i think';
-	echo ' your sessionId is: <strong>'.session_id().'</strong></p>';
+	echo ' your sessionId is: <strong>'.session_id().'</strong>, if there is a sessionId present, we have a problem</p>';
 } elseif( isset( $_GET[ 'garbagecollection'] ) ) {
 	
 	session_start();
